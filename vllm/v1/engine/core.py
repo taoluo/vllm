@@ -193,6 +193,67 @@ class EngineCore:
         self.scheduler.finish_requests(request_ids,
                                        RequestStatus.FINISHED_ABORTED)
 
+    def abort_to_target_requests_cnt(self, target_leftover_cnt: int):
+        """"prioritize abort waiting request then swapped out requests
+        then running reqeuests sorted by shortest total tokens"""
+        
+        # Get current counts from all queues
+        waiting_requests = list(self.scheduler.waiting)
+        swapped_requests = list(self.scheduler.swapped) if hasattr(self.scheduler, 'swapped') else []
+        running_requests = list(self.scheduler.running)
+        total_count = len(waiting_requests) + len(swapped_requests) + len(running_requests)
+        
+        # Calculate how many requests to interrupt
+        interrupt_count = total_count - target_leftover_cnt
+        
+        if interrupt_count <= 0:
+            logger.info(f"No interruption needed: total_count={total_count}, target_leftover={target_leftover_cnt}")
+            return
+            
+        logger.info(f"Dynamic load balance: need to interrupt {interrupt_count} requests "
+                   f"(waiting={len(waiting_requests)}, running={len(running_requests)}, "
+                   f"swapped={len(swapped_requests)}, target_leftover={target_leftover_cnt})")
+        
+        # Merge swapped and running requests and sort by total tokens (shortest first)
+        swapped_and_running = []
+        
+        # Add swapped requests
+        for req in swapped_requests:
+            total_tokens = req.num_tokens
+            swapped_and_running.append((req.request_id, total_tokens, 'swapped'))
+        
+        # Add running requests
+        for req in running_requests:
+            total_tokens = req.num_tokens
+            swapped_and_running.append((req.request_id, total_tokens, 'running'))
+        
+        # Sort by total tokens (ascending) - interrupt shortest sequences first
+        swapped_and_running.sort(key=lambda x: x[1])
+        
+        # Concatenate all requests in priority order: waiting -> (swapped+running sorted by length)
+        all_requests_ordered = []
+        all_requests_ordered.extend([(r.request_id, 'waiting') for r in waiting_requests])
+        all_requests_ordered.extend([(rid, status) for rid, _, status in swapped_and_running])
+        
+        # Select requests to interrupt
+        requests_to_interrupt = []
+        idx = 0
+        
+        while len(requests_to_interrupt) < interrupt_count and idx < len(all_requests_ordered):
+            request_id, status = all_requests_ordered[idx]
+            requests_to_interrupt.append(request_id)
+            idx += 1
+        
+        # Abort all selected requests at once
+        if requests_to_interrupt:
+            logger.info(f"Aborting {len(requests_to_interrupt)} requests: {requests_to_interrupt}")
+            self.abort_requests(requests_to_interrupt)
+            return requests_to_interrupt
+
+
+
+
+
     def step(self) -> EngineCoreOutputs:
         """Schedule, execute, and make output."""
 
