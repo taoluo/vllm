@@ -362,6 +362,13 @@ class EngineCore:
                        timeout: Optional[float] = None,
                        args: tuple = (),
                        kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
+        # Special handling for abort_to_target_requests_cnt to avoid TP inconsistency
+        if method == 'abort_to_target_requests_cnt':
+
+            result = self.abort_to_target_requests_cnt(*args)
+
+            return result
+        
         return self.model_executor.collective_rpc(method, timeout, args,
                                                   kwargs)
 

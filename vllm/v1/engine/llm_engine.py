@@ -288,8 +288,14 @@ class LLMEngine:
                        timeout: Optional[float] = None,
                        args: tuple = (),
                        kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
-        return self.engine_core.collective_rpc(method, timeout, args, kwargs)
+        res =  self.engine_core.collective_rpc(method, timeout, args, kwargs)
 
+        if method == "abort_to_target_requests_cnt" and res:
+            request_ids = self.output_processor.abort_requests(res)
+            # asert perfect match of request_ids
+            assert set(request_ids) == set(res), f"Mismatch in request_ids: {set(request_ids)} != {set(res)}"
+
+        return res
     def __del__(self):
         if dp_group := getattr(self, "dp_group", None):
             stateless_destroy_torch_distributed_process_group(dp_group)
